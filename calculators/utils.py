@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 from decimal import Decimal
 
 def apply_operator(op, a, b):
@@ -20,8 +21,13 @@ class Token:
         self.type = type
         self.value = value
 
+class Node(ABC):
+    @abstractmethod
+    def evaluate(self):
+        # 계산 결과를 반환하는 메서드
+        pass
 
-class NumNode:
+class NumNode(Node):
     def __init__(self, value):
         self.value = Decimal(value)
     
@@ -38,7 +44,7 @@ class NumNode:
         return self.value
     
 
-class UnaryOpNode:
+class UnaryOpNode(Node):
     def __init__(self, op, node):
         self.op = op
         self.node = node
@@ -61,8 +67,10 @@ class UnaryOpNode:
         else:
             raise ValueError(f"Invalid operator '{self.op}'")
 
-
-class BinOpNode:
+# TODO Type hinting (3개 노드 클래스를 표현하는 Node 클래스는 추후 구현)
+    # node : evaluate 함수를 포함해서 추후 Node 클래스를 상속받는 모든 클래스가 반드시 evaluate 함수를 포함하도록 강제
+# 장점: 새로운 클래스를 추가할 때 타입 체크 가능 (type safety - 오류를 구현 과정에서 발견할 수 있음) / 가독성
+class BinOpNode(Node):
     def __init__(self, left, op, right):
         self.left = left
         self.op = op
