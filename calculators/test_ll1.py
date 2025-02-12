@@ -1,7 +1,7 @@
-from ll1_calculator import LL1Calculator
+from ll1_calculator import Lexer, Parser, Evaluator
 from decimal import Decimal
 
-def run_test_cases(calculator_class):
+def run_test_cases():
     test_cases = [
         # 📌 기본 기능 테스트 (Basic Functionality)
         ("1+2-3*6/2", -6),
@@ -56,7 +56,9 @@ def run_test_cases(calculator_class):
     passed = 0
     failed = 0
 
-    calculator = LL1Calculator()
+    parser = Parser()
+    evaluator = Evaluator()
+
     for expr, expected in test_cases:
         # 긴 입력이면 출력 생략
         if len(expr) > 100:
@@ -64,8 +66,12 @@ def run_test_cases(calculator_class):
         else:
             expr_display = expr
         try:
-            result = calculator.calculate(expr, debug=False)
-
+            tokens = Lexer.tokenize(expr)
+            parser.tokens = tokens
+            parser.current_token = parser.tokens.popleft() if parser.tokens else None
+            
+            ast = parser.parse()
+            result = evaluator.evaluate(ast)
 
 
             if isinstance(expected, type) and issubclass(expected, Exception):
@@ -93,4 +99,4 @@ def run_test_cases(calculator_class):
     print(f"❌ Failed: {failed}")
 
 if __name__ == "__main__":
-    run_test_cases(LL1Calculator)
+    run_test_cases()
