@@ -102,6 +102,9 @@ class MathParser:
         
     
     def parse_factor(self) -> 'Expression':
+        # print("Remaining Tokens:", self.tokens)
+        # print("Current Token:", self.current_token)
+        # import pdb; pdb.set_trace()
         # F (Factor, 인자) 문법 규칙: F -> num | (E) | (+ F) | (- F)
         if self.current_token is None:  
             raise ValueError("Unexpected end of input.")
@@ -114,7 +117,7 @@ class MathParser:
         elif self.current_token.type == 'const':
             val = self.current_token.value
             self.consume('const')
-            return NumExpression(MATH_CONSTANTS[val])
+            return NumExpression(MATH_CONSTANTS[val], name=val)
         
         elif self.current_token.type == '+':
             self.consume('+')
@@ -162,7 +165,7 @@ class Evaluator:
     @staticmethod
     def evaluate(ast: 'Expression', env: dict = None, verbose: bool = False) -> Decimal:
         # 해를 찾을 수 있는 경우, sympy로 방정식 풀기
-        variables = Evaluator.collect_var_names(ast)
+        variables = collect_var_names(ast)
         if variables:
             env = dict()
             for var in variables:
@@ -172,12 +175,14 @@ class Evaluator:
             result = ast.evaluate(env)
 
         if verbose:
-            print("\n## Equation (str):")
+            print("\n## Equation (str) ##")
             print(str(ast)) # 바깥 괄호 제거
-            print("\n## AST (repr):")
+            print("\n## AST (repr) ##")
             print(ast.__repr__())
             print("\n## Canonicalized:", ast.canonicalize())
-            print("\n## Result:", result)
+            print("\n## Result ##")
+            print(result)
+            print("Domain:\n", ast._domain_str())
         return result
     
     @staticmethod
@@ -190,28 +195,11 @@ class Evaluator:
             return sol
         else:
             return ast.canonicalize().evaluate(env)
-        
-    @staticmethod
-    def collect_var_names(expr: 'Expression'):
-        # AST에서 변수 이름을 추출
-        if isinstance(expr, VarExpression):
-            return {expr.name}
-        elif isinstance(expr, UnaryOpExpression):
-            return Evaluator.collect_var_names(expr.expr)
-        elif isinstance(expr, BinOpExpression):
-            return Evaluator.collect_var_names(expr.left) | Evaluator.collect_var_names(expr.right)
-        elif isinstance(expr, SingleVarFunction):
-            return Evaluator.collect_var_names(expr.expr)
-        elif isinstance(expr, MultiVarFunction):
-            return set().union(*[Evaluator.collect_var_names(arg) for arg in expr.args])
-        return set()
-
 
 def calculate_expression(expression: str, verbose: bool = False) -> Decimal:
     tokens = Lexer.tokenize(expression, verbose)
     parser = MathParser()
     parser.tokens = tokens
     ast = parser.parse()
-    print(ast)
-    # import pdb; pdb.set_trace()
-    return Evaluator.evaluate(ast, verbose=True), ast
+    result = Evaluator.evaluate(ast, verbose=True)
+    return result, ast
