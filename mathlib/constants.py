@@ -22,6 +22,8 @@ FUNCTIONS_math = {
     "exp'": math.exp,
     "log": math.log,
     "log'": lambda x: 1 / x,
+    "ln": math.log,
+    "ln'": lambda x: 1 / x,
     "arcsin": math.asin,
     "arcsin'": lambda x: 1 / math.sqrt(1 - x ** 2),
     "arccos": math.acos,
@@ -46,6 +48,8 @@ FUNCTIONS = {
     "exp'": sp.exp,
     "log": sp.log,
     "log'": lambda x: 1 / x,
+    "ln": sp.ln,
+    "ln'": lambda x: 1 / x,
     "arcsin": sp.asin,
     "arcsin'": lambda x: 1 / sp.sqrt(1 - x ** 2),
     "arccos": sp.acos,
@@ -57,4 +61,15 @@ FUNCTIONS = {
     "abs": sp.Abs,
     "abs'": lambda x: 1 if x > 0 else -1,
     "diff": lambda x: x.derivative(),
+}
+
+INVERSE_FUNCTIONS = {
+    "ln": "exp",
+    "exp": "ln",
+    "sin": "arcsin",
+    "cos": "arccos",
+    "tan": "arctan",
+    "arcsin": "sin",
+    "arccos": "cos",
+    "arctan": "tan",
 }

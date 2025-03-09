@@ -1,11 +1,22 @@
 import re
 from decimal import Decimal
-from sympy import symbols, solve, Eq
 from collections import deque
 
-from utils import *
+from expression_utils import *
 from constants import *
 from expressions import *
+
+class Token:
+    def __init__(self, type, value):
+        self.type = type
+        self.value = value
+
+    def __str__(self):
+        return f"Token({self.value}, type:{self.value})"
+    
+    def __repr__(self):
+        return f"Token({self.value}, type:{self.value})"
+
 
 class Lexer:
     TOKEN_REGEX = re.compile(r'\s*(\d+\.\d+|\d+|[()+\-*/^,]|[a-zA-Z]+)') # 실수 | 정수 | 상수 | 연산자
@@ -24,7 +35,7 @@ class Lexer:
                     if token_value in OPERATORS:
                         tokens.append(Token(token_value, token_value))
                     # 1-1. 기타 기호
-                    elif token_value in ('=', ',', '(', ')'):
+                    elif token_value in (',', '(', ')'):
                         tokens.append(Token(token_value, token_value))
                     # 2. 주요 수학 상수 (pi, e 등)
                     elif token_value in MATH_CONSTANTS:
@@ -98,13 +109,14 @@ class MathParser:
             op = self.current_token.value
             self.consume(op)
             node = BinOpExpression(node, op, self.parse_factor())
+
+        if hasattr(node, 'left') and node.left == NumExpression(MATH_CONSTANTS['e']):
+            return SingleVarFunction("exp", node.right)
+        
         return node
         
     
     def parse_factor(self) -> 'Expression':
-        # print("Remaining Tokens:", self.tokens)
-        # print("Current Token:", self.current_token)
-        # import pdb; pdb.set_trace()
         # F (Factor, 인자) 문법 규칙: F -> num | (E) | (+ F) | (- F)
         if self.current_token is None:  
             raise ValueError("Unexpected end of input.")
@@ -149,7 +161,12 @@ class MathParser:
             self.consume(')')
 
             if len(arguments) == 1:
+                if func_name == 'sqrt':
+                    return BinOpExpression(arguments[0], '^', NumExpression(0.5))
+                if func_name == 'log':
+                    func_name = 'ln'
                 return SingleVarFunction(func_name, arguments[0])
+            
             else:
                 return MultiVarFunction(func_name, *arguments)
         
@@ -161,18 +178,11 @@ class MathParser:
         else:
             raise ValueError(f"Unexpected token: {self.current_token.value}")
         
+
 class Evaluator:
     @staticmethod
     def evaluate(ast: 'Expression', env: dict = None, verbose: bool = False) -> Decimal:
-        # 해를 찾을 수 있는 경우, sympy로 방정식 풀기
-        variables = collect_var_names(ast)
-        if variables:
-            env = dict()
-            for var in variables:
-                env[var] = symbols(var)
-            result = Evaluator.solve_equation(ast, env, verbose)
-        else:
-            result = ast.evaluate(env)
+        result = ast.canonicalize().evaluate(env)
 
         if verbose:
             print("\n## Equation (str) ##")
@@ -184,22 +194,11 @@ class Evaluator:
             print(result)
             print("Domain:\n", ast._domain_str())
         return result
-    
-    @staticmethod
-    def solve_equation(ast: 'Expression', env: dict = None, verbose: bool = False) -> Decimal:
-        if isinstance(ast, BinOpExpression) and ast.op == '=':
-            lhs = ast.left
-            rhs = ast.right
-            eq = Eq(lhs.evaluate(env), rhs.evaluate(env))
-            sol = solve(eq, lhs)
-            return sol
-        else:
-            return ast.canonicalize().evaluate(env)
 
 def calculate_expression(expression: str, verbose: bool = False) -> Decimal:
-    tokens = Lexer.tokenize(expression, verbose)
+    tokens = Lexer.tokenize(expression)
     parser = MathParser()
     parser.tokens = tokens
     ast = parser.parse()
-    result = Evaluator.evaluate(ast, verbose=True)
+    result = Evaluator.evaluate(ast, verbose=verbose)
     return result, ast
