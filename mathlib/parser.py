@@ -2,7 +2,6 @@ import re
 from decimal import Decimal
 from collections import deque
 
-from expression_utils import *
 from constants import *
 from expressions import *
 

@@ -11,9 +11,6 @@ from mpl_toolkits.mplot3d import Axes3D  # 3D plot
 
 getcontext().prec = 10
 
-# Interval, check_continuity_at, check_differentiability_at 등
-# 필요한 클래스와 함수들은 실제 구현에 맞게 import 혹은 정의되어야 합니다.
-
 def decimal_to_float(d, places=10):
     return float(format(d, f".{places}f"))
 
@@ -62,7 +59,7 @@ def create_figure_from_expr(expr, domain_dict: dict[str, Interval] = None, fig: 
             if not np.isnan(xi):
                 try:
                     y_val = expr.evaluate({var: xi})
-                    y_vals.append(decimal_to_float(y_val.value.quantize(Decimal("1E-10"), rounding=ROUND_HALF_DOWN).normalize()))
+                    y_vals.append(decimal_to_float(y_val.value.quantize(Decimal("1.0000000000"), rounding=ROUND_HALF_DOWN).normalize()))
                 except:
                     y_vals.append(np.nan)
             else:
@@ -91,7 +88,7 @@ def create_figure_from_expr(expr, domain_dict: dict[str, Interval] = None, fig: 
             if not np.isnan(pt[variables[0]]) and not np.isnan(pt[variables[1]]):
                 try:
                     y_val = expr.evaluate(pt)
-                    values.append(decimal_to_float(y_val.value.quantize(Decimal("1E-10"), rounding=ROUND_HALF_DOWN).normalize()))
+                    values.append(decimal_to_float(y_val.value.quantize(Decimal("1.0000000000"), rounding=ROUND_HALF_DOWN).normalize()))
                 except:
                     values.append(np.nan)
             else:
@@ -123,7 +120,7 @@ def create_figure_from_expr(expr, domain_dict: dict[str, Interval] = None, fig: 
                 point[var] = np.random.uniform(start, end)
             points_list.append(point)
             values.append(
-                decimal_to_float(expr.evaluate(point).value.quantize(Decimal("1E-10"), rounding=ROUND_HALF_DOWN))
+                decimal_to_float(expr.evaluate(point).value.quantize(Decimal("1.0000000000"), rounding=ROUND_HALF_DOWN))
                 if domain_dict[variables[0]].contains(point[variables[0]]) and domain_dict[variables[1]].contains(point[variables[1]])
                 else np.nan
             )
@@ -163,34 +160,41 @@ def plot_graph_gradio(state_ast, state_vars):
     if not state_vars or len(state_vars) == 0:
         return create_constant_figure(const_value=state_ast.evaluate().value)
 
-    # ---------------------------------
-    # 1) state_ast -> expr 로 변환(예: parse_ast_to_expr 등)
-    #    실제 사용자 로직에 따라 수정
-    expr = state_ast.canonicalize()  # 예시
+    expr = state_ast.canonicalize()
 
-    # 2) expr.domain 세팅 (없다면 기본 -10~10)
-    #    사용자 코드에 따라 이미 설정돼 있을 수도 있으므로, 
-    #    만약 domain 정보가 없다면 기본 값을 설정하는 식으로 사용.
     if not hasattr(expr, "domain"):
         expr.domain = {}
     for var in expr.vars_:
         if var not in expr.domain:
-            # 도메인 정보가 전혀 없다면 -10, 10을 기본값으로
             expr.domain[var] = Interval(-100, 100)
 
-    # 3) Matplotlib Figure 생성
-    fig = create_figure_from_expr(expr, expr.domain)  # 아래 정의한 헬퍼 함수
-
+    fig = create_figure_from_expr(expr, expr.domain) 
     return fig
+
 
 def add_expression_to_figure(fig, expr, history):
     """
-    기존의 Matplotlib figure에 새로운 수식의 그래프를 추가합니다.
+    deprecated.. 구현 실패..
     """
     color_idx = len(history.split("\n"))
     fig = create_figure_from_expr(expr, expr.domain, fig, color_idx)
     return fig
 
+def process_expression(expression):
+    expression = expression.strip()
+    if not expression:
+        return "Error: Empty expression", None, None
+    try:
+        result, ast = calculate_expression(expression, verbose=False)
+        # canonicalized 결과를 LaTeX 형식으로 감싸서 출력
+        output = f"$$ {result} $$"
+        if ast._domain_str():
+            output += f"\n\n**도메인**<br>{ast._domain_str().replace('\n', '<br>')}"
+        variables = collect_var_names(result)
+        return output, ast, variables
+    except Exception as e:
+        return f"Error: {str(e)}", None, None
+    
 def evaluate_value_gradio(ast: Expression, value_table: gr.DataFrame):
     if not ast:
         return "No valid AST provided.", ast
@@ -216,7 +220,10 @@ def evaluate_range_gradio(ast, range_table):
     for _, row in range_table.iterrows():
         if row['Range']:
             new_domain[row['Variable']] = Interval.parse(row['Range'], row['Variable'])
-    ast.update_domain(new_domain)
+    
+    for var in ast.domain.keys():
+        ast.domain[var] = ast.domain[var].intersects(new_domain[var])
+    
     result = ast.evaluate()
     output = f"$$ {result} $$"
     if ast._domain_str():
@@ -235,10 +242,6 @@ def evaluate_plot_range_gradio(ast, plot_output_range):
 
 
 def check_continuity_gradio(ast, variables, check_type, value_table, range_table):
-    # state_ast, state_vars, cont_input_type, cont_value_table, cont_range_table
-    """
-    기존 문자열 입력 방식의 연속성 체크 함수.
-    """
     point_dict = {}
     if check_type == "값":
         for _, row in value_table.iterrows():
@@ -271,9 +274,6 @@ def check_continuity_gradio(ast, variables, check_type, value_table, range_table
     return output, ast
 
 def check_differentiability_gradio(ast, variables, check_type, value_table, range_table):
-    """
-    기존 문자열 입력 방식의 미분가능성 체크 함수.
-    """
     point_dict = {}
     variable_list = sorted(variables)
 
@@ -327,21 +327,6 @@ def differentiate_gradient_gradio(ast):
     gradient_ast = ast.gradient()
     output = f"Result (gradient):\n\n$$ {gradient_ast.canonicalize()} $$"
     return output, ast, collect_var_names(gradient_ast)
-
-def process_expression(expression):
-    expression = expression.strip()
-    if not expression:
-        return "Error: Empty expression", None, None
-    try:
-        result, ast = calculate_expression(expression, verbose=False)
-        # canonicalized 결과를 LaTeX 형식으로 감싸서 출력
-        output = f"$$ {result} $$"
-        if ast._domain_str():
-            output += f"\n\n**도메인**<br>{ast._domain_str().replace('\n', '<br>')}"
-        variables = collect_var_names(result)
-        return output, ast, variables
-    except Exception as e:
-        return f"Error: {str(e)}", None, None
 
 
 def update_variable_table(vars_list, cont_input_type):
@@ -413,63 +398,6 @@ def update_plot_range_table(vars_list):
     else:
         return gr.update(visible=False)
 
-def update_all_expression(ast, updates_table):
-    """
-    updates_table: 각 행이 [Variable, Domain, Value] 형태의 데이터.
-    수식이 바뀌지 않은 경우, 기존 변수 목록은 그대로 유지되어 사용자가 반복해서 업데이트할 수 있습니다.
-    """
-    if ast is None or updates_table is None:
-        return "No valid AST or updates provided.", ast, None
-    output = ""
-    new_domain = {}
-    new_value = {}
-    for row in updates_table:
-        if len(row) < 3:
-            continue
-        var = row[0]
-        domain_val = row[1]
-        value_val = row[2]
-        if str(domain_val).strip():
-            new_domain[var] = str(domain_val).strip()
-        if str(value_val).strip():
-            new_value[var] = str(value_val).strip()
-
-    if new_domain:
-        out, ast = update_domain_for_var(ast, new_domain)
-        output += out
-    if new_value:
-        out, ast = evaluate_value_for_var(ast, new_value)
-        output += out
-
-    vars_list = sorted(collect_var_names(ast))
-    return output, ast, vars_list
-
-def update_domain_for_var(ast, var_dict):
-    output = ""
-    try:
-        # var_dict: {변수: 도메인 문자열}
-        parsed_domains = {var: Interval.parse(n_domain, var) for var, n_domain in var_dict.items() if n_domain}
-        ast.update_domain(parsed_domains)
-        output += f"Updated Domain for {', '.join(parsed_domains.keys())}: {ast._domain_str()}\n"
-    except Exception as e:
-        output += f"Error updating domain for {', '.join(var_dict.keys())}: {e}\n"
-    return output, ast
-
-def evaluate_value_for_var(ast, var_dict):
-    output = ""
-    for var, value_str in var_dict.items():
-        try:
-            d_val = Decimal(value_str)
-            assert ast.domain[var].contains(d_val), f"Value {value_str} is not in the domain of {var}"
-        except Exception as e:
-            return f"Invalid value for {var}: {value_str} ({e})\n", ast
-    try:
-        result = ast.evaluate(var_dict)
-        output = f"$$ {result} $$"
-    except Exception as e:
-        output += f"Error during evaluation: {e}\n"
-    return output, ast
-
 # --- 새롭게 추가된 함수들 (체크용 테이블) ---
 
 def init_current_expr():
@@ -481,47 +409,12 @@ def update_current_expr(history, ast):
     history_list.append(f"$$ {ast.canonicalize()} $$")
     return "\n".join(history_list)
 
-def update_check_table(vars_list):
-    """
-    연속성/미분가능성 확인용 테이블 업데이트 함수.
-    각 변수에 대해 [Variable, Value] 형태의 행을 생성합니다.
-    """
-    if vars_list:
-        vars_list = sorted(vars_list)
-        table = [[var, ""] for var in vars_list]
-        return gr.update(value=table, visible=True)
-    else:
-        return gr.update(visible=False)
-    
 def update_table_visibility(choice):
     if choice == "값":
         return gr.update(visible=True), gr.update(visible=False)
     else:  # choice == "구간"
         return gr.update(visible=False), gr.update(visible=True)
 
-
-
-def check_differentiability_gradio_table(ast, table_data):
-    """
-    체크용 테이블의 각 행([Variable, Value])을 읽어 미분가능성을 체크합니다.
-    """
-    if ast is None or table_data is None:
-        return "No valid AST or check table provided.", ast
-    output = ""
-    point = {}
-    for row in table_data:
-        if len(row) < 2:
-            continue
-        var = row[0]
-        val = str(row[1]).strip() if row[1] is not None else ""
-        if val:
-            try:
-                point[var] = Decimal(val)
-            except Exception as e:
-                output += f"Invalid value for {var}: {val} ({e})\n"
-    differentiability = check_differentiability_at(ast, point)
-    output += f"Differentiability at {', '.join(f'{k}={v}' for k, v in point.items())}: {differentiability}\n"
-    return output, ast
 
 
 # --- UI 구성 ---

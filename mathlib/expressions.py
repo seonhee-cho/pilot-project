@@ -5,10 +5,11 @@ from fractions import Fraction
 from collections import defaultdict
 import numpy as np
 import matplotlib.pyplot as plt
+from decimal import Decimal, ROUND_HALF_UP
 
 from constants import *
 from interval import *
-from expression_utils import *
+
 
 def apply_operator(op, a, b):
     if op == '+':
@@ -72,23 +73,6 @@ class Expression(ABC):
         self.vars_ = vars_ if vars_ else set()
         self.domain = domain if domain else {}
         self._intrinsic_domain = self.domain
-
-    def update_domain(self, new_domain: Interval):
-        # new_domain이 함수의 원 정의역인 self._intrinsic_domain 에 포함되는지 확인
-        # 포함될 시 self.domain 을 new_domain 으로 업데이트
-        # 포함되지 않을 시 오류 발생
-        for var in new_domain.keys():
-            if var not in self._intrinsic_domain:
-                self.domain[var] = new_domain[var]
-            else:
-                if not new_domain[var].issubset(self._intrinsic_domain[var]):
-                    raise ValueError(f"Interval {new_domain[var]} is not a subset of the intrinsic domain")            
-                else:
-                    for points in self._intrinsic_domain[var].excluded_points:
-                        if new_domain.contains(points):
-                            raise ValueError(f"Interval {new_domain} contains excluded points")
-                    
-                self.domain[var] = new_domain[var]
 
     def evaluate(self, env: dict = None) -> 'Expression':
         pass
@@ -174,7 +158,7 @@ class NumExpression(Expression):
         )
         self.value = value if isinstance(value, Decimal) else Decimal(value)
         try:
-            self.value = self.value.quantize(Decimal("1E-10"), rounding=ROUND_HALF_UP).normalize()
+            self.value = self.value.quantize(Decimal("1.0000000000"), rounding=ROUND_HALF_UP).normalize()
         except Exception as e:
             print(f"Error quantizing value: {e}")
         if self.value == 0: # -0 처리
@@ -233,7 +217,7 @@ class NumExpression(Expression):
         return str(self.value)
     
     def _repr_tree(self, level=0):
-        return f"{'  ' * level}NumExpression({self.name if self.name else self.value.quantize(Decimal("1E-10"), rounding=ROUND_HALF_UP).normalize()})"
+        return f"{'  ' * level}NumExpression({self.name if self.name else self.value})"
     
     def to_sympy(self) -> sp.Expr:
         return sp.Integer(self.value)
@@ -286,11 +270,13 @@ class UnaryOpExpression(Expression):
         
     def derivative(self, var: str) -> 'Expression':
         if self.op == '+':
-            return self.expr.derivative(var).canonicalize()
+            output = self.expr.derivative(var).canonicalize()
         elif self.op == '-':
-            return -self.expr.derivative(var).canonicalize()
+            output = -self.expr.derivative(var).canonicalize()
         else:
             raise ValueError(f"Invalid operator: {self.op}")
+        output.domain = self.domain
+        return output
         
     def directional_derivative(self, direction: dict):
         deriv = []
@@ -356,6 +342,9 @@ class BinOpExpression(Expression):
                         right_val = right.value
                     else:
                         right_val = right.evaluate().value
+
+                    if right_val == 0.5: # sqrt(x) 일 때
+                        merged_domains[v].conditions.add((left, "geq", NumExpression(0)))
                     
                     if right_val % 1 != 0:  # 비정수일 경우: x<0이면 안됨
                         frac = Fraction(right_val).limit_denominator()
@@ -502,9 +491,12 @@ class VarExpression(Expression):
     
     def derivative(self, var: str) -> 'Expression':
         if self.name == var:
-            return NumExpression(1)
+            output = NumExpression(1)
         else:
-            return NumExpression(0)
+            output = NumExpression(0)
+
+        output.domain = self.domain
+        return output
         
     def directional_derivative(self, direction: dict) -> 'Expression':
         if self.name not in direction:
@@ -821,7 +813,9 @@ class UnionExpression(Expression):
         return UnionExpression(*[simplify(arg.canonicalize()) for arg in self.args])
     
     def derivative(self, var: str) -> 'Expression':
-        return UnionExpression(*[arg.derivative(var).canonicalize() for arg in self.args])
+        output = UnionExpression(*[arg.derivative(var).canonicalize() for arg in self.args])
+        output.domain = self.domain
+        return output
     
     def directional_derivative(self, direction: dict) -> 'Expression':
         return UnionExpression(*[arg.directional_derivative(direction) for arg in self.args])
@@ -874,6 +868,8 @@ def collect_var_names(expr: 'Expression'):
     
 
 def simplify(expr: Expression) -> Expression:
+    if isinstance(expr, NumExpression) or isinstance(expr, VarExpression):
+        return expr
     # 정규화 시 필요한 기능들
     log_expr = rewrite_log_powers(expr) # log(x^n) -> n*log(x)
     expanded_expr = distribute(log_expr) # 분배

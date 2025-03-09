@@ -134,21 +134,21 @@ class Interval:
         
         return f"Interval({main_str})"
     
-    def contains(self, value) -> bool:
+    def contains(self, point) -> bool:
         # 1) 제외할 점이 있는 경우
-        if self.excluded_points and value in self.excluded_points:
+        if self.excluded_points and point in self.excluded_points:
             return False
         
         # 2) 정의된 범위 내에 들어가는지
-        if value < self.start or value > self.end:
+        if point < self.start or point > self.end:
             return False
-        if (value == self.start and not self.closed_start) or (value == self.end and not self.closed_end):
+        if (point == self.start and not self.closed_start) or (point == self.end and not self.closed_end):
             return False
         
         # 3) 조건 확인
         for expr, cond_type, val in self.conditions:
             if cond_type != "all":
-                res = expr.evaluate(env={self.name: value})
+                res = expr.evaluate(env={self.name: point})
                 if cond_type == "neq" and res == val:
                     return False
                 elif cond_type == "leq" and res > val:
