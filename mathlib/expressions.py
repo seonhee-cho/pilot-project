@@ -72,7 +72,7 @@ class Expression(ABC):
                 ):
         self.vars_ = vars_ if vars_ else set()
         self.domain = domain if domain else {}
-        self._intrinsic_domain = self.domain
+        self._intrinsic_domain = self.domain.copy()
 
     def evaluate(self, env: dict = None) -> 'Expression':
         pass
@@ -153,8 +153,6 @@ class NumExpression(Expression):
         super().__init__(
             vars_=set(),
             domain={},
-            # domain={"constant": Interval.all_real()},
-            # range_=Interval(name, value, value, closed_start=True, closed_end=True)
         )
         self.value = value if isinstance(value, Decimal) else Decimal(value)
         try:
@@ -214,7 +212,7 @@ class NumExpression(Expression):
     def __str__(self):
         if self.name:
             return self.name
-        return str(self.value)
+        return format(self.value, 'f')
     
     def _repr_tree(self, level=0):
         return f"{'  ' * level}NumExpression({self.name if self.name else self.value})"
@@ -373,16 +371,10 @@ class BinOpExpression(Expression):
             return output
     
     def canonicalize(self) -> 'Expression':
-        """
-        식 정규화
-        1. 각 인자 정규화
-        2. 로그 함수 정리 e.g. log(x^n) -> n*log(x)
-        3. 분배 법칙 적용 e.g. (A+B) * C = A*C + B*C
-        4. 동류항 합치기
-        5. 식 재구성
-        """
         left = self.left.canonicalize()
         right = self.right.canonicalize()
+
+        # 정규화 필요 없이 값 계산만 하면 되는 경우
         if isinstance(left, NumExpression) and isinstance(right, NumExpression):
             if self.op == '+':
                 return NumExpression(left.value + right.value)
@@ -583,6 +575,7 @@ class SingleVarFunction(Expression):
         try:
             return NumExpression( Decimal(str(FUNCTIONS[self.func](val_expr.value))) )
         except Exception as e:
+            print(e)
             import pdb; pdb.set_trace()
             pass
     
@@ -697,19 +690,30 @@ class MultiVarFunction(Expression):
         
         if self.func == 'log':
             base, value = args
-            # base > 0, base != 1
-            # value > 0
-            if isinstance(base, VarExpression):
-                merged_domain[base.name] = merged_domain[base.name].intersects(Interval(base.name, 0, Decimal("inf"), False, False))
-                merged_domain[base.name].excluded_points.add(Decimal(1))
-            elif isinstance(base, NumExpression):
+            # base > 0, base != 1  &  value > 0
+            # ---- base 처리 ----
+            if isinstance(base, NumExpression): # 숫자면 바로 검증
                 if base.value <= 0 or base.value == 1:
                     raise ValueError(f"Domain error: Log function - base value")
-            if isinstance(value, VarExpression):
-                merged_domain[value.name] = merged_domain[value.name].intersects(Interval(value.name, 0, Decimal("inf"), False, False))
-            elif isinstance(value, NumExpression):
+            elif isinstance(base, VarExpression): # 단일 변수면 범위에 바로 추가
+                merged_domain[base.name] = merged_domain[base.name].intersects(Interval(base.name, 0, Decimal("inf"), False, False))
+                merged_domain[base.name].excluded_points.add(Decimal(1))
+            else: # 식이면 조건 추가
+                base_vars = collect_var_names(base)
+                for v in base_vars:
+                    merged_domain[v].conditions.add((base, "gt", NumExpression(0)))
+                    merged_domain[v].conditions.add((base, "neq", NumExpression(1)))
+
+            # ---- value 처리 ----
+            if isinstance(value, NumExpression):
                 if value.value <= 0:
                     raise ValueError(f"Domain error: Log function - argument value")
+            elif isinstance(value, VarExpression):
+                merged_domain[value.name] = merged_domain[value.name].intersects(Interval(value.name, 0, Decimal("inf"), False, False))
+            else:
+                value_vars = collect_var_names(value)
+                for v in value_vars:
+                    merged_domain[v].conditions.add((value, "gt", NumExpression(0)))
 
         super().__init__(vars_=combined_vars, domain=merged_domain)
 

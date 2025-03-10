@@ -32,6 +32,7 @@ def create_figure_from_expr(expr, domain_dict: dict[str, Interval] = None, fig: 
     """
 
     variables = list(expr.vars_)
+    tol = 1e-10  # 원하는 허용 오차
     n = len(variables)
     domain_dict = domain_dict if domain_dict else expr.domain
     # 샘플링 설정
@@ -64,7 +65,8 @@ def create_figure_from_expr(expr, domain_dict: dict[str, Interval] = None, fig: 
                     y_vals.append(np.nan)
             else:
                 y_vals.append(np.nan)
-        y_vals = np.array(y_vals, dtype=np.float32)
+        y_vals = np.array(y_vals, dtype=np.float64)
+        y_vals = np.where(np.abs(y_vals) <= tol, 0, y_vals)
 
         if fig is None:
             fig, ax = plt.subplots(figsize=(6,4))
@@ -93,7 +95,8 @@ def create_figure_from_expr(expr, domain_dict: dict[str, Interval] = None, fig: 
                     values.append(np.nan)
             else:
                 values.append(np.nan)
-        values = np.array(values, dtype=np.float32)
+        values = np.array(values, dtype=np.float64)
+        values = np.where(np.abs(values) <= tol, 0, values)
         Z = values.reshape(X.shape)
         if fig is None:
             fig = plt.figure(figsize=(6,4))
@@ -105,36 +108,7 @@ def create_figure_from_expr(expr, domain_dict: dict[str, Interval] = None, fig: 
             ax.set_title(str(expr.canonicalize()))
 
     else:
-        # 3개 이상의 변수 => 무작위 샘플링
-        points_list = []
-        values = []
-        for _ in range(100):
-            point = {}
-            for var in variables:
-                interval = expr.domain[var]
-                start, end = interval.start, interval.end
-                if start == -np.inf:
-                    start = -10
-                if end == np.inf:
-                    end = 10
-                point[var] = np.random.uniform(start, end)
-            points_list.append(point)
-            values.append(
-                decimal_to_float(expr.evaluate(point).value.quantize(Decimal("1.0000000000"), rounding=ROUND_HALF_DOWN))
-                if domain_dict[variables[0]].contains(point[variables[0]]) and domain_dict[variables[1]].contains(point[variables[1]])
-                else np.nan
-            )
-        values = np.array(values, dtype=np.float32)
-        
-        if fig is None:
-            fig, ax = plt.subplots(figsize=(6,4))
-        else:
-            ax = fig.gca()
-        ax.plot(range(len(values)), values, marker='o')
-        ax.set_xlabel("Sample Index")
-        ax.set_ylabel("Function Value")
-        ax.set_title("Plot of the Expression on Random Points")
-        ax.grid(True)
+        fig = plt.figure(figsize=(6,4))
 
     return fig
 
@@ -147,16 +121,17 @@ def plot_graph_gradio(state_ast, state_vars):
     1. 변수가 없으면 메시지 반환
     2. 변수가 있으면, 
        - expr 객체를 얻은 뒤(사용자 코드에 맞춰 변환 필요),
-       - 도메인을 설정하고(기본 [-10, 10] 혹은 expr.domain에 이미 값이 있다면 활용),
+       - 도메인을 설정하고(기본 [-100, 100] 혹은 expr.domain에 이미 값이 있다면 활용),
        - Matplotlib으로 그래프 생성 후 figure를 반환.
     """
+    # 수식이 없는 경우
     if not state_ast:
         return plt.figure(figsize=(6,4))
-    
+    # gradient 같은 형태거나 3차원 이상의 그래프는 그릴 수 없음
     if isinstance(state_ast, UnionExpression) or len(state_vars) > 2:
         return plt.figure(figsize=(6,4))
     
-    # 우선, 변수가 전혀 없다면 (상수 함수라면) 그래프를 그릴 수 없으므로 안내 메시지
+    # 상수 함수 그래프
     if not state_vars or len(state_vars) == 0:
         return create_constant_figure(const_value=state_ast.evaluate().value)
 
@@ -206,7 +181,6 @@ def evaluate_value_gradio(ast: Expression, value_table: gr.DataFrame):
         if row.iloc[1]:
             assert ast.domain[row['Variable']].contains(Decimal(row.iloc[1])), f"Value {row.iloc[1]} is not in the domain of {row['Variable']}"
             new_value_dict[row['Variable']] = Decimal(row.iloc[1])
-        
     result = ast.evaluate(new_value_dict)
     output = f"$$ {result} $$"
 
@@ -221,8 +195,8 @@ def evaluate_range_gradio(ast, range_table):
         if row['Range']:
             new_domain[row['Variable']] = Interval.parse(row['Range'], row['Variable'])
     
-    for var in ast.domain.keys():
-        ast.domain[var] = ast.domain[var].intersects(new_domain[var])
+    for var in new_domain.keys():
+        ast.domain[var] = ast._intrinsic_domain[var].intersects(new_domain[var])
     
     result = ast.evaluate()
     output = f"$$ {result} $$"
