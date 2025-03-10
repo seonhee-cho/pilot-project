@@ -1,8 +1,8 @@
 import math
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 from typing import Optional
-import sympy as sp
 from fractions import Fraction
+
 class Interval:
     """
     expression의 정의역을 나타내기 위한 클래스.

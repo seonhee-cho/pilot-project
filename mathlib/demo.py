@@ -14,146 +14,141 @@ getcontext().prec = 10
 def decimal_to_float(d, places=10):
     return float(format(d, f".{places}f"))
 
-def create_constant_figure(const_value=3):
-    x_vals = np.linspace(0, 10, 100)
-    y_vals = np.full_like(x_vals, const_value)
+
+def create_figure_from_expr(expr_list: list[Expression]):
+    """
+    expr 리스트를 받아 하나의 figure에 여러 개의 그래프를 그리도록 함.
+    단, 원함수와 도함수의 차원 (변수 개수) 이 달라지는 경우, 원함수의 그래프만 반환
+    """
+    if not expr_list:
+        return plt.figure(figsize=(6,4))
     
-    fig, ax = plt.subplots()
-    ax.plot(x_vals, y_vals, label=f"y={const_value}")
-    ax.set_ylim(const_value - 1, const_value + 1)  # y 범위 설정
-    ax.set_title("Constant Function")
-    ax.legend()
-    return fig
+    expr_list = flatten_expressions(expr_list)
+    
+    # 첫번째 수식(원함수)
+    org_expr = expr_list[0]
+    org_vars = sorted(org_expr.vars_)
 
-def create_figure_from_expr(expr, domain_dict: dict[str, Interval] = None, fig: plt.Figure = None, idx: int = 0):
-    """
-    expr 내의 변수를 확인해 1D/2D/3D 이상 등의 경우를 나눠 
-    Matplotlib figure를 만들어 반환.
-    """
-
-    variables = list(expr.vars_)
+    # 원함수가 상수인 경우, 따로 그리지 않음.
+    # 최대 3차원의 그래프를 그릴 수 있음.
+    if not 0 < len(org_vars) < 3:
+        print(f"Warning: {org_expr.canonicalize()} has {len(org_vars)} variables, skipping graph...")
+        return plt.figure(figsize=(6,4))
+    
     tol = 1e-10  # 원하는 허용 오차
-    n = len(variables)
-    domain_dict = domain_dict if domain_dict else expr.domain
-    # 샘플링 설정
-    samples = {}
-    for var in variables:
-        interval = domain_dict[var]
-        start, end = interval.start, interval.end
-        if start == -np.inf:
-            start = -100
-        if end == np.inf:
-            end = 100
-        samples[var] = [float(str(x)) if interval.contains(x) else np.nan for x in np.linspace(start, end, 100)]
+    fig = None
+    ax = None
     
-    if n == 0:
-        # 상수 함수 처리
-        fig = create_constant_figure(expr.evaluate().value)
-        return fig
+    for expr in expr_list:
+        cur_vars = sorted(expr.vars_)
+        if len(cur_vars) != len(org_vars):
+            print(f"Warning: {expr.canonicalize()} has different number of variables ({cur_vars}), skipping graph...")
+            continue
+        
+        if len(cur_vars) == 1:
+            var = cur_vars[0]
+            domain = expr.domain.get(var, Interval(var, -100, 100))
+            start = domain.start if domain.start != -np.inf else -100
+            end = domain.end if domain.end != np.inf else 100
 
-    if n == 1:
-        # 1차원 그래프
-        var = variables[0]
-        x_vals = samples[var]
-        y_vals = []
-        for xi in x_vals:
-            if not np.isnan(xi):
-                try:
-                    y_val = expr.evaluate({var: xi})
-                    y_vals.append(decimal_to_float(y_val.value.quantize(Decimal("1.0000000000"), rounding=ROUND_HALF_DOWN).normalize()))
-                except:
+            x_vals = np.linspace(start, end, 100)
+            y_vals = []
+            for xi in x_vals:
+                if domain.contains(xi):
+                    try:
+                        y_val = expr.evaluate({var: xi})
+                        y_vals.append(decimal_to_float(y_val.value.quantize(Decimal("1.0000000000"), rounding=ROUND_HALF_DOWN).normalize()))
+                    except:
+                        y_vals.append(np.nan)
+                else:
                     y_vals.append(np.nan)
+
+            y_vals = np.array(y_vals, dtype=np.float64)
+            y_vals = np.where(np.abs(y_vals) <= tol, 0, y_vals)
+
+            if fig is None:
+                fig, ax = plt.subplots(figsize=(6,4))
             else:
-                y_vals.append(np.nan)
-        y_vals = np.array(y_vals, dtype=np.float64)
-        y_vals = np.where(np.abs(y_vals) <= tol, 0, y_vals)
+                ax = fig.gca()
+            ax.plot(x_vals, y_vals, label=str(expr.canonicalize()))
+            ax.set_xlabel(var)
+            ax.set_ylabel(f"f({var})")
+        
+        elif len(cur_vars) == 2:
+            v1, v2 = cur_vars
+            domain1 = expr.domain.get(v1, Interval(v1, -100, 100))
+            domain2 = expr.domain.get(v2, Interval(v2, -100, 100))
 
-        if fig is None:
-            fig, ax = plt.subplots(figsize=(6,4))
-        else:
-            ax = fig.gca()
-        ax.plot(x_vals, y_vals, marker='o')
-        ax.set_xlabel(var)
-        ax.set_ylabel(f"f({var})")
-        ax.set_title(str(expr.canonicalize()))
-        ax.grid(True)
+            start1 = domain1.start if domain1.start != -np.inf else -100
+            end1 = domain1.end if domain1.end != np.inf else 100
+            start2 = domain2.start if domain2.start != -np.inf else -100
+            end2 = domain2.end if domain2.end != np.inf else 100
 
-    elif n == 2:
-        # 2차원 (3D surface)
-        X, Y = np.meshgrid(samples[variables[0]], samples[variables[1]])
-        points_list = []
-        for idx in range(X.size):
-            point = {variables[0]: X.flat[idx], variables[1]: Y.flat[idx]}
-            points_list.append(point)
-        values = []
-        for pt in points_list:
-            if not np.isnan(pt[variables[0]]) and not np.isnan(pt[variables[1]]):
-                try:
-                    y_val = expr.evaluate(pt)
-                    values.append(decimal_to_float(y_val.value.quantize(Decimal("1.0000000000"), rounding=ROUND_HALF_DOWN).normalize()))
-                except:
-                    values.append(np.nan)
+            x_vals = np.linspace(start1, end1, 50)
+            y_vals = np.linspace(start2, end2, 50)
+
+            X, Y = np.meshgrid(x_vals, y_vals)
+            Z = []
+            for idx in range(X.size):
+                px = X.flat[idx]
+                py = Y.flat[idx]
+                if domain1.contains(px) and domain2.contains(py):
+                    try:
+                        z_val = expr.evaluate({v1: px, v2: py})
+                        Z.append(decimal_to_float(z_val.value.quantize(Decimal("1.0000000000"), rounding=ROUND_HALF_DOWN).normalize()))
+                    except:
+                        Z.append(np.nan)
+                else:
+                    Z.append(np.nan)
+
+            Z = np.array(Z, dtype=np.float64).reshape(X.shape)
+            Z = np.where(np.abs(Z) <= tol, 0, Z)
+
+            if fig is None:
+                fig, ax = plt.subplots(figsize=(6,4))
+                ax = fig.add_subplot(111, projection='3d')
             else:
-                values.append(np.nan)
-        values = np.array(values, dtype=np.float64)
-        values = np.where(np.abs(values) <= tol, 0, values)
-        Z = values.reshape(X.shape)
-        if fig is None:
-            fig = plt.figure(figsize=(6,4))
-            ax = fig.add_subplot(111, projection='3d')
-            ax.plot_surface(X, Y, Z, cmap='viridis')
-            ax.set_xlabel(variables[0])
-            ax.set_ylabel(variables[1])
-            ax.set_zlabel(f"f({variables[0]}, {variables[1]})")
-            ax.set_title(str(expr.canonicalize()))
-
-    else:
-        fig = plt.figure(figsize=(6,4))
+                if not fig.axes:
+                    ax = fig.add_subplot(111, projection='3d')
+                else:
+                    ax = fig.gca()
+            
+            ax.plot_surface(X, Y, Z, alpha=0.5, label=str(expr.canonicalize()))
+            ax.set_xlabel(v1)
+            ax.set_ylabel(v2)
+            ax.set_zlabel(f"f({v1}, {v2})")
+    
+    if ax is not None:
+        if hasattr(ax, 'lines') and len(ax.lines) > 0:
+            ax.legend()
 
     return fig
 
-def plot_graph_gradio(state_ast, state_vars):
+def plot_graph_gradio(history_state):
     """
     state_ast 가 변할 때마다 새로운 그래프를 그리도록 호출될 함수.
-    state_ast: 현재 수식(혹은 파싱된 AST)
-    state_vars: 현재 수식에서 추출된 변수 정보 (딕셔너리 or 리스트)
-
-    1. 변수가 없으면 메시지 반환
-    2. 변수가 있으면, 
-       - expr 객체를 얻은 뒤(사용자 코드에 맞춰 변환 필요),
-       - 도메인을 설정하고(기본 [-100, 100] 혹은 expr.domain에 이미 값이 있다면 활용),
-       - Matplotlib으로 그래프 생성 후 figure를 반환.
+    history_state : 원함수와 도함수 ast를 담은 리스트 (원함수 한 개만 있을수도 있음.)
     """
-    # 수식이 없는 경우
-    if not state_ast:
-        return plt.figure(figsize=(6,4))
-    # gradient 같은 형태거나 3차원 이상의 그래프는 그릴 수 없음
-    if isinstance(state_ast, UnionExpression) or len(state_vars) > 2:
+
+    if not history_state:
         return plt.figure(figsize=(6,4))
     
-    # 상수 함수 그래프
-    if not state_vars or len(state_vars) == 0:
-        return create_constant_figure(const_value=state_ast.evaluate().value)
-
-    expr = state_ast.canonicalize()
-
-    if not hasattr(expr, "domain"):
-        expr.domain = {}
-    for var in expr.vars_:
-        if var not in expr.domain:
-            expr.domain[var] = Interval(-100, 100)
-
-    fig = create_figure_from_expr(expr, expr.domain) 
+    fig = create_figure_from_expr(history_state)
     return fig
 
+def flatten_expressions(expr_list: list[Expression]) -> list[Expression]:
+    """
+    expressions들의 리스트를 받아, 내부에 UnionExpression 객체(gradient 등)가 있는 경우, 각 항을 모아서 리스트로 반환
+    e.g. UnionExpression(2y, 2x) -> [2y, 2x]
+    """
+    flattened = []
+    for expr in expr_list:
+        if isinstance(expr, UnionExpression):
+            flattened.extend(expr.args)
+        else:
+            flattened.append(expr)
+    return flattened
 
-def add_expression_to_figure(fig, expr, history):
-    """
-    deprecated.. 구현 실패..
-    """
-    color_idx = len(history.split("\n"))
-    fig = create_figure_from_expr(expr, expr.domain, fig, color_idx)
-    return fig
 
 def process_expression(expression):
     expression = expression.strip()
@@ -247,6 +242,7 @@ def check_continuity_gradio(ast, variables, check_type, value_table, range_table
     output = f"Continuity at {', '.join(f'{k}={v}' for k, v in point_dict.items())}:\n\n$$ {continuity} $$"
     return output, ast
 
+
 def check_differentiability_gradio(ast, variables, check_type, value_table, range_table):
     point_dict = {}
     variable_list = sorted(variables)
@@ -298,12 +294,35 @@ def differentiate_direction_gradio(ast, direction_table):
     return output, ast, collect_var_names(ast)
 
 def differentiate_gradient_gradio(ast):
-    gradient_ast = ast.gradient()
-    output = f"Result (gradient):\n\n$$ {gradient_ast.canonicalize()} $$"
-    return output, ast, collect_var_names(gradient_ast)
+    ast = ast.gradient()
+    output = f"Result (gradient):\n\n$$ {ast.canonicalize()} $$"
+    return output, ast, collect_var_names(ast)
 
 
-def update_variable_table(vars_list, cont_input_type):
+# --- 데모에 출력되는 테이블/마크다운 업데이트 함수들 ---
+
+def init_current_expr():
+    return [], ""
+
+def get_history_markdown(history, ast):
+    new_history = history + [ast.canonicalize()]
+    new_markdown = "<br/>".join([f"$$ {expr} $$" for expr in new_history])
+    return new_markdown
+
+def update_current_expr(history, ast):
+    # state_ast 가 업데이트 됨 - history에 추가, history_markdown에 반영
+    new_history = history + [ast.canonicalize()]
+    new_markdown = get_history_markdown(history, ast)
+    return new_history, new_markdown
+
+def update_table_visibility(choice):
+    if choice == "값":
+        return gr.update(visible=True), gr.update(visible=False)
+    else:  # choice == "구간"
+        return gr.update(visible=False), gr.update(visible=True)
+
+
+def update_variable_table(vars_list):
     """
     vars_list가 비어있지 않으면 각 변수에 대해 [Variable, Domain, Value] 형태의 행을 생성하여 Dataframe을 업데이트합니다.
     """
@@ -372,24 +391,6 @@ def update_plot_range_table(vars_list):
     else:
         return gr.update(visible=False)
 
-# --- 새롭게 추가된 함수들 (체크용 테이블) ---
-
-def init_current_expr():
-    return ""
-
-def update_current_expr(history, ast):
-    # 입력 수식, 
-    history_list = history.split("\n")
-    history_list.append(f"$$ {ast.canonicalize()} $$")
-    return "\n".join(history_list)
-
-def update_table_visibility(choice):
-    if choice == "값":
-        return gr.update(visible=True), gr.update(visible=False)
-    else:  # choice == "구간"
-        return gr.update(visible=False), gr.update(visible=True)
-
-
 
 # --- UI 구성 ---
 
@@ -408,15 +409,15 @@ with gr.Blocks() as demo:
             output_text = gr.Markdown()
         with gr.Column():
             gr.Markdown("히스토리")
-            history_state = gr.State("")
+            history_state = gr.State([])
+            history_markdown = gr.Markdown()
     # 상태: AST와 변수 목록 저장
     state_ast = gr.State()
     state_vars = gr.State()
-    history_state = gr.State("")
     submit_expr.click(fn=process_expression, inputs=expr_input, 
                       outputs=[output_text, state_ast, state_vars])
-    submit_expr.click(fn=init_current_expr, outputs=history_state)
-    state_ast.change(fn=update_current_expr, inputs=[history_state, state_ast], outputs=history_state)
+    submit_expr.click(fn=init_current_expr, outputs=[history_state, history_markdown])
+    state_ast.change(fn=update_current_expr, inputs=[history_state, state_ast], outputs=[history_state, history_markdown])
     
     # === 두번째 섹션: 변수 값 업데이트 (수식에 변수가 있을 때) ===
     gr.Markdown("## 2. 변수 값/범위 업데이트")
@@ -462,7 +463,7 @@ with gr.Blocks() as demo:
             plot_output_range = gr.Dataframe(label="그래프 범위 입력", headers=["Variable", "Range"], visible=False)
             plot_output_range_button = gr.Button("그래프 범위 입력")
         
-    state_ast.change(fn=plot_graph_gradio, inputs=[state_ast, state_vars], outputs=plot_output)
+    history_state.change(fn=plot_graph_gradio, inputs=[history_state], outputs=plot_output)
 
     state_vars.change(fn=update_variable_table, inputs=[state_vars], outputs=[value_table, range_table])
     state_vars.change(fn=update_cont_variable_table, inputs=[state_vars, cont_input_type], outputs=[cont_value_table, cont_range_table])
@@ -470,8 +471,6 @@ with gr.Blocks() as demo:
     state_vars.change(fn=update_diff_variable_table, inputs=[state_vars, diff_input_type], outputs=[diff_value_table, diff_range_table])
     state_vars.change(fn=update_diff_dir_variable_table, inputs=[state_vars], outputs=[diff_direction_table])
     state_vars.change(fn=update_plot_range_table, inputs=[state_vars], outputs=[plot_output_range])
-
-    # history_state.change(fn=add_expression_to_figure, inputs=[plot_output, state_ast, history_state], outputs=plot_output)
 
     update_value_btn.click(fn=evaluate_value_gradio, 
                            inputs=[state_ast, value_table], 
