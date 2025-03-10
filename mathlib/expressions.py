@@ -278,7 +278,7 @@ class UnaryOpExpression(Expression):
         
     def directional_derivative(self, direction: dict):
         deriv = []
-        for var in self.vars_:
+        for var in sorted(self.vars_):
             coef = NumExpression(direction.get(var, 0))  # 해당 변수의 방향 성분; 없으면 0으로 간주
             deriv.append(coef * self.derivative(var))
         output = UnionExpression(*deriv)
@@ -427,7 +427,7 @@ class BinOpExpression(Expression):
     
     def directional_derivative(self, direction: dict) -> 'Expression':
         deriv = []
-        for var in self.vars_:
+        for var in sorted(self.vars_):
             coef = NumExpression(direction.get(var, 0))  # 해당 변수의 방향 성분; 없으면 0으로 간주
             deriv.append(coef * self.derivative(var))
         output = UnionExpression(*deriv)
@@ -645,7 +645,7 @@ class SingleVarFunction(Expression):
     
     def directional_derivative(self, direction: dict) -> 'Expression':
         deriv = []
-        for var in self.vars_:
+        for var in sorted(self.vars_):
             coef = NumExpression(direction.get(var, 0))  # 해당 변수의 방향 성분; 없으면 0으로 간주
             deriv.append(coef * self.derivative(var))
         output = UnionExpression(*deriv)
@@ -760,7 +760,7 @@ class MultiVarFunction(Expression):
 
     def directional_derivative(self, direction: dict) -> 'Expression':
         deriv = []
-        for var in self.vars_:
+        for var in sorted(self.vars_):
             coef = NumExpression(direction.get(var, 0))
             deriv.append(coef * self.derivative(var))
         output = UnionExpression(*deriv)
