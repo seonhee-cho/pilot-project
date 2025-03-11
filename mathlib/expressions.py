@@ -5,11 +5,12 @@ from fractions import Fraction
 from collections import defaultdict
 import numpy as np
 import matplotlib.pyplot as plt
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP, getcontext
 
 from constants import *
 from interval import *
 
+getcontext().prec = 10
 
 def apply_operator(op, a, b):
     if op == '+':
@@ -88,7 +89,7 @@ class Expression(ABC):
 
     def gradient(self) -> 'Expression':
         if self.vars_:
-            return UnionExpression( *[self.derivative(var) for var in self.vars_] )
+            return UnionExpression( *[self.derivative(var) for var in sorted(self.vars_)] )
         else:
             return NumExpression(0)
     
@@ -116,7 +117,7 @@ class Expression(ABC):
             return ""
         
         pairs = []
-        for var, interval in self.domain.items():
+        for var, interval in sorted(self.domain.items()):
             pairs.append(f"{var}: {interval}")
         return "\n".join(pairs)
 
@@ -156,9 +157,9 @@ class NumExpression(Expression):
         )
         self.value = value if isinstance(value, Decimal) else Decimal(value)
         try:
-            self.value = self.value.quantize(Decimal("1.0000000000"), rounding=ROUND_HALF_UP).normalize()
+            self.value = self.value.quantize(Decimal("1.000000000000000"), rounding=ROUND_HALF_UP).normalize()
         except Exception as e:
-            print(f"Error quantizing value: {e}")
+            print(f"Error quantizing value: {self.value}")
         if self.value == 0: # -0 처리
             self.value = Decimal(0)
         self.name = name
@@ -476,7 +477,6 @@ class VarExpression(Expression):
         try:
             if env is None or self.name not in env or isinstance(env[self.name], sp.Symbol):
                 return self
-            out = NumExpression( Decimal( env[self.name] ) )
         except:
             import pdb; pdb.set_trace()
         return NumExpression( Decimal( env[self.name] ) )

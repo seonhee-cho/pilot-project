@@ -129,7 +129,8 @@ class Interval:
             main_str += f", {ex_pts_str}"
         
         if self.conditions:
-            cond_str = f"conditions={[(str(expr.canonicalize()), cond_type, val.value) for expr,cond_type,val in self.conditions]}"
+            cond_dict = {'eq': '=', 'neq': '≠', 'leq': '≤', 'geq': '≥', 'lt': '<', 'gt': '>'}
+            cond_str = f"\n - condition:{'\n'.join([(str(expr.canonicalize()) + ' ' + cond_dict[cond_type] + ' ' + str(val.value)) for expr,cond_type,val in self.conditions])}"
             main_str += f", {cond_str}"
         
         return f"Interval({main_str})"
