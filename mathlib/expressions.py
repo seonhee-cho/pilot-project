@@ -30,43 +30,6 @@ def apply_operator(op, a, b):
 
 
 class Expression(ABC):
-    """
-    수학식 (함수, 상수, 변수, 연산 등)을 추상적으로 표현하는 클래스
-    
-    초기화 시:
-    vars_ : 변수 이름 집합
-    domain : 변수 이름과 해당 변수의 정의역 집합
-    
-    # 메서드:
-    (계산 관련)
-    canonicalize() -> Expression: 수식 정규화
-    evaluate(env: dict) -> Expression: 수식 계산
-    
-    (미분 관련)
-    derivative(var: str) -> Expression: 미분
-    gradient() -> Expression: 기울기
-    
-    (정의역 관련)
-    is_continuous_at(var: str, point: Decimal) -> bool: 연속성 확인
-    is_differentiable_at(var: str, point: Decimal) -> bool: 미분가능성 확인
-    
-    (상수 관련)
-    is_constant() -> bool: 상수 여부 확인
-    is_integer() -> bool: 정수 여부 확인
-    
-    (magic methods)
-    __eq__(other: Expression) -> bool: 동등성 확인
-    __hash__() -> int: 해시 값 반환
-    __str__() -> str: 문자열 표현
-    _repr_tree(level: int) -> str: 트리 표현
-
-    __add__(other: Expression) -> Expression: 덧셈
-    __sub__(other: Expression) -> Expression: 뺄셈
-    __mul__(other: Expression) -> Expression: 곱셈
-    __truediv__(other: Expression) -> Expression: 나눗셈
-    __pow__(other: Expression) -> Expression: 거듭제곱
-
-    """
     def __init__(self,
                   vars_: set[str],
                   domain: dict[str, Interval] = None,
@@ -108,7 +71,6 @@ class Expression(ABC):
         return self._repr_tree()
     
     def _repr_tree(self, level=0):
-        # 객체 타입을 포함한 트리 구조 표현
         pass
     
     def _domain_str(self):
@@ -213,13 +175,10 @@ class NumExpression(Expression):
     def __str__(self):
         if self.name:
             return self.name
-        return format(self.value, 'f')
+        return format(self.value, 'f') # 지수표기법 사용 방지
     
     def _repr_tree(self, level=0):
         return f"{'  ' * level}NumExpression({self.name if self.name else self.value})"
-    
-    def to_sympy(self) -> sp.Expr:
-        return sp.Integer(self.value)
 
 
 class UnaryOpExpression(Expression):
@@ -417,6 +376,13 @@ class BinOpExpression(Expression):
                 else:
                     output = NumExpression(0)
 
+            if isinstance(self.right, NumExpression):
+                if self.right.value == 0:
+                    output = NumExpression(0)
+                elif self.right.value == 1:
+                    output = NumExpression(1)
+                else:
+                    output = self.right * right_deriv
             else:
                 # x^x, 3^x 같이 추가적인/복잡한 미분공식이 필요한 경우는 지원 x
                 raise ValueError("Function derivative not available.")
@@ -461,6 +427,7 @@ class BinOpExpression(Expression):
             f"{self.left._repr_tree(level + 2)}\n"
             f"{self.right._repr_tree(level + 2)}"
         )
+    
 
 class VarExpression(Expression):
     def __init__(self, name: str, interval: Interval = None):
@@ -520,9 +487,6 @@ class VarExpression(Expression):
 
     def _repr_tree(self, level=0):
         return f"{'  ' * level}VarExpression({self.name})"
-    
-    def to_sympy(self) -> sp.Expr:
-        return sp.symbols(self.name)
 
 
 class SingleVarFunction(Expression):
@@ -918,7 +882,7 @@ def rewrite_log_powers(expr: Expression) -> Expression:
 def distribute(expr: Expression) -> Expression:
     """
     1. BinOpExpression 중 (A + B) * C 형태로 나타날 때 분배법칙을 이용해
-    A*C + B*C 로 바꾼다. 내부적으로 재귀적으로 전개한 다음 반환.
+    A*C + B*C 로 바꾼다. 재귀적으로 내부 항을 먼저 전개한 다음 반환.
     2. 거듭제곱 전개
     (x + 1)^2 → (x + 1)*(x + 1) → ...
     """
@@ -969,16 +933,16 @@ def distribute(expr: Expression) -> Expression:
         expr_inside = distribute(expr.expr)
         return UnaryOpExpression(expr.op, expr_inside)
 
-    elif isinstance(expr, SingleVarFunction) or isinstance(expr, MultiVarFunction):
+    elif isinstance(expr, SingleVarFunction):
+        return SingleVarFunction(expr.func, distribute(expr.expr))
+    
+    elif isinstance(expr, MultiVarFunction):
         # 내부식도 분배
         new_args = []
-        for arg in expr.args if isinstance(expr, MultiVarFunction) else [expr.expr]:
+        for arg in expr.args:
             new_args.append(distribute(arg))
 
-        if isinstance(expr, MultiVarFunction):
-            return MultiVarFunction(expr.func, *new_args)
-        else:
-            return SingleVarFunction(expr.func, new_args[0])
+        return MultiVarFunction(expr.func, *new_args)
         
     elif isinstance(expr, UnionExpression):
         return UnionExpression(*[distribute(arg) for arg in expr.args])
@@ -1028,6 +992,7 @@ def collect_terms(expr):
                         for var, exp in var_dict_right.items():
                             new_dict[var] = new_dict.get(var, 0) + exp
                         terms.append((c1 * c2, new_dict))
+
             elif node.op == "/":
                 # A / B -> A * B^(-1)
                 terms.append((1, {('div', node.left, node.right): 1}))
@@ -1038,9 +1003,6 @@ def collect_terms(expr):
                 base_terms = collect_terms(node.left)
                 exp = node.right
                 if len(base_terms) != 1:
-                    # raise ValueError(f"거듭제곱 내부 이슈 - distribute 처리가 안됨 {base_terms}")
-                    # (x+1)/(x-1) 와 같은 경우, 분모^(-1) 형태로 변환되기 때문에 이 if 문이 호출됨.
-                    # 이 경우 전체 분모를 그냥 하나의 항으로 처리
                     terms.append((1, {('pow', node): 1}))
 
                 else:
@@ -1069,6 +1031,7 @@ def collect_terms(expr):
             func_name = node.func
             key = ('func', func_name) + tuple(node.args)
             terms.append((1, {key: 1}))
+
         else:
             terms.append((1, {('unknown', node): 1}))
     
@@ -1122,8 +1085,9 @@ def sort_terms_for_rebuild(terms: list[tuple[Decimal, dict]]) -> list[tuple[Deci
             if selected_exp is None:
                 selected_exp = 0
             return (0, min_num, -float(selected_exp))
+        
         else:
-            # 분모가 있는 경우, (-1)승의 곱으로 표현됨. 가장 뒤에서 곱해주기.
+            # 분모가 있는 경우, 가장 뒤에서 곱해주기.
             min_den = min(denominator_keys)
             return (1, "zz_" + min_den, 0) # 변수가 x, y, z인데, 사전순서로 정렬 시 그 뒤에 올 수 있도록 zz prefix
 

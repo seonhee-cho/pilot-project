@@ -11,32 +11,6 @@ MATH_CONSTANTS = {
     "gamma": Decimal("0.577215664901532860606512090082402431042"),
 } # tau = pi * 2
 
-FUNCTIONS_math = {
-    "sin": math.sin,
-    "sin'": math.cos,
-    "cos": math.cos,
-    "cos'": lambda x: -math.sin(x),
-    "tan": math.tan,
-    "tan'": lambda x: 1 / (math.cos(x) ** 2),
-    "exp": math.exp,
-    "exp'": math.exp,
-    "log": math.log,
-    "log'": lambda x: 1 / x,
-    "ln": math.log,
-    "ln'": lambda x: 1 / x,
-    "arcsin": math.asin,
-    "arcsin'": lambda x: 1 / math.sqrt(1 - x ** 2),
-    "arccos": math.acos,
-    "arccos'": lambda x: -1 / math.sqrt(1 - x ** 2),
-    "arctan": math.atan,
-    "arctan'": lambda x: 1 / (1 + x ** 2),
-    "sqrt": math.sqrt,
-    "sqrt'": lambda x: 1 / (2 * math.sqrt(x)),
-    "abs": math.fabs,
-    "abs'": lambda x: 1 if x > 0 else -1,
-    "diff": lambda x: x.derivative(),
-}
-
 FUNCTIONS = {
     "sin": sp.sin,
     "sin'": sp.cos,

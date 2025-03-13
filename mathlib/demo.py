@@ -234,6 +234,7 @@ def process_expression(expression):
         output = f"$$ {result} $$"
         if ast._domain_str():
             output += f"\n\n도메인<br>{ast._domain_str().replace('\n', '<br>')}"
+        output += f"\n\n**표현식**<br>{ast.__repr__().replace('\n', '<br>').replace(' ', '&nbsp;&nbsp;')}"
         variables = collect_var_names(result)
         return output, ast, variables
     except Exception as e:
@@ -267,9 +268,9 @@ def evaluate_range_gradio(ast, history_state, range_table):
             if isinstance(expr, UnionExpression):
                 for arg_idx in range(len(expr.args)):
                     if var in expr.args[arg_idx].domain:
-                        expr.args[arg_idx].domain[var] = expr.args[arg_idx].domain[var].intersects(new_domain[var])
+                        expr.args[arg_idx].domain[var] = expr.args[arg_idx]._intrinsic_domain[var].intersects(new_domain[var])
             else:
-                expr.domain[var] = expr.domain[var].intersects(new_domain[var])
+                expr.domain[var] = expr._intrinsic_domain[var].intersects(new_domain[var])
 
     ast = history_state[-1]
     

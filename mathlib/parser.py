@@ -18,7 +18,7 @@ class Token:
 
 
 class Lexer:
-    TOKEN_REGEX = re.compile(r'\s*(\d+\.\d+|\d+|[()+\-*/^,]|[a-zA-Z]+)') # 실수 | 정수 | 상수 | 연산자
+    TOKEN_REGEX = re.compile(r'\s*(\d+\.\d+|\d+|[()+\-*/^,]|[a-zA-Z]+)') # 실수 | 정수 | 연산자 | 수학 상수, 함수, 변수
 
     @staticmethod
     def tokenize(expression: str, verbose: bool = False) -> deque[Token]:
