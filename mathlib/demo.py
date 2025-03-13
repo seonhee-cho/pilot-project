@@ -12,7 +12,7 @@ def decimal_to_float(d, places=10):
     return float(format(d, f".{places}f"))
 
 # --- 그래프 그리기 함수 ---
-def sample_1d(expr, var, n_samples=1000, tol=1e-12):
+def sample_1d(expr, var, n_samples=10000, tol=1e-10):
     """
     1. 주어진 domain [domain.start, domain.end] 범위에서 linspace로 n_samples 개의 점을 샘플링
     2. 그 중 유효한 도메인의 점에 대해서만 y_vals 를 구함. 유효한 정의역이 아니면 np.nan 으로 처리
@@ -66,7 +66,7 @@ def _sample_1d(expr, var, domain, start, end, n_samples=10000, tol=1e-10):
     y_vals = np.where(np.abs(y_vals) <= tol, 0, y_vals)
     return x_vals, y_vals
 
-def sample_2d(expr, var1, var2, n_samples=100, tol=1e-12):
+def sample_2d(expr, var1, var2, n_samples=100, tol=1e-10):
     """
     1. 주어진 domain [domain1.start, domain1.end] x [domain2.start, domain2.end] 범위에서 linspace로 n_samples 개의 점을 샘플링
     2. 그 중 유효한 도메인의 점에 대해서만 z_vals 를 구함. 유효한 정의역이 아니면 np.nan 으로 처리
@@ -106,9 +106,9 @@ def _sample_2d(expr, var1, var2, domain1, domain2, start1, end1, start2, end2, n
             try:
                 z_val = expr.evaluate({var1: px, var2: py})
                 # 더 높은 정밀도로 설정
-                decimal_val = z_val.value.quantize(Decimal("1.00000000000"), rounding=ROUND_HALF_DOWN).normalize()
+                decimal_val = z_val.value.quantize(Decimal("1.0000000000"), rounding=ROUND_HALF_DOWN).normalize()
                 # 더 작은 tolerance 값 사용
-                if abs(decimal_val) < Decimal('1e-12'):
+                if abs(decimal_val) < Decimal('1e-10'):
                     Z.append(0.0)
                 else:
                     Z.append(decimal_to_float(decimal_val))

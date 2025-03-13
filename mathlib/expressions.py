@@ -375,14 +375,6 @@ class BinOpExpression(Expression):
                     output = self.right * (self.left ** NumExpression(self.right.value - 1))
                 else:
                     output = NumExpression(0)
-
-            if isinstance(self.right, NumExpression):
-                if self.right.value == 0:
-                    output = NumExpression(0)
-                elif self.right.value == 1:
-                    output = NumExpression(1)
-                else:
-                    output = self.right * right_deriv
             else:
                 # x^x, 3^x 같이 추가적인/복잡한 미분공식이 필요한 경우는 지원 x
                 raise ValueError("Function derivative not available.")
@@ -1008,11 +1000,7 @@ def collect_terms(expr):
                 else:
                     (c, p) = base_terms[0]
                     if not isinstance(exp, NumExpression):
-                        if isinstance(node.left, NumExpression):
-                            terms.append((1, {('pow', node): 1}))
-                        else:
-                            # 지수가 숫자가 아닌 경우 (e.g. x^y)
-                            terms.append((c, {('pow', node): 1}))
+                        terms.append((1, {('pow', node): 1}))
                     else:
                         n = exp.value
                         if not isinstance(c, Decimal):
@@ -1040,6 +1028,10 @@ def collect_terms(expr):
 
 
 def combine_like_terms(terms):
+    """
+    동류항 정리
+    e.g. 3*x - 2*x + 1 -> [(3, ({x: 1})), (-2, ({x: 1})), (1, ())] -> [(1, ({x: 1})), (1, ())]
+    """
     # collect_terms로 뽑아낸 리스트에서 동일한 변수를 갖는 계수를 합산
     combined = defaultdict(Decimal)
 
@@ -1076,20 +1068,23 @@ def sort_terms_for_rebuild(terms: list[tuple[Decimal, dict]]) -> list[tuple[Deci
                 numerator_keys.append(str(k[0]) if isinstance(k, tuple) else str(k))
 
         if numerator_keys:
-            min_num = min(numerator_keys)
+            var_key = ''.join(sorted(numerator_keys))
             selected_exp = None
             for k, exp in var_dict.items():
                 key_name = k if isinstance(k, str) else k[0]
-                if key_name == min_num:
+                if key_name == var_key:
                     selected_exp = exp
             if selected_exp is None:
                 selected_exp = 0
-            return (0, min_num, -float(selected_exp))
+            # 0 : 상수항이 아님.
+            # var_key : 변수 이름
+            # -float(selected_exp) : 차수를 내림차순으로 정렬하기 위함
+            return (0, var_key, -float(selected_exp))
         
         else:
-            # 분모가 있는 경우, 가장 뒤에서 곱해주기.
-            min_den = min(denominator_keys)
-            return (1, "zz_" + min_den, 0) # 변수가 x, y, z인데, 사전순서로 정렬 시 그 뒤에 올 수 있도록 zz prefix
+            # 분모가 있는 경우, 분자보다 뒤에서 곱해주기.
+            var_key = ''.join(sorted(denominator_keys))
+            return (1, var_key, 0)
 
     return sorted(terms, key=term_sort_key)
 
@@ -1097,13 +1092,13 @@ def sort_terms_for_rebuild(terms: list[tuple[Decimal, dict]]) -> list[tuple[Deci
 def rebuild_expression(terms):
     # 항(단항) 하나를 expression으로 만드는 헬퍼 함수
     def build_term(coeff: Decimal, var_dict: dict) -> 'Expression':
-        # 계수
+        # term_expr = (일단) 계수
         if coeff == 1 and var_dict:
             term_expr = None
         else:
             term_expr = NumExpression(coeff)
 
-        # 변수/지수
+        # term_expr에 변수/지수 반영
         for var_key, exponent in sorted(var_dict.items(), key=lambda x: len(str(x[0]))): # pow(, ^-1)이 오면 뒤로 가도록
             try:
                 # exponent가 0일 경우, 생략
@@ -1163,73 +1158,6 @@ def rebuild_expression(terms):
             expr_sum = BinOpExpression(expr_sum, '+', single_expr)
     return expr_sum if expr_sum else NumExpression(0)
 
-
-def get_sort_key(expr: Expression) -> tuple:
-    """
-    1) 변수 이름 사전순 (x < y < z)
-    2) 지수(내림차순) (x^(n+1) > x^n)
-    3) 함수(Function)의 경우, 인자에 변수가 있으면 그 인자(변수) 우선 비교 -> 
-       그 뒤 함수 이름 사전순
-    4) BinOpExpression도 (op-rank, left_key, right_key) 식으로 재귀 비교
-    """
-    # (A) 숫자
-    if isinstance(expr, NumExpression):
-        # 예) (type_rank=0, 값) -> 숫자는 맨 앞쪽으로(오름차순) 놓게 됨.
-        return (0, float(expr.value))
-
-    # (B) 변수
-    elif isinstance(expr, VarExpression):
-        return (1, expr.name)
-
-    # (C) 단항 함수: SingleVarFunction
-    elif isinstance(expr, SingleVarFunction):
-        # 인자가 변수가 있는지 확인하여, 인자 key를 먼저 두고, 그 다음 함수 이름
-        # 예: (2, (인자키), func_name)
-        inner_key = get_sort_key(expr.expr)
-        return (2, inner_key, expr.func)
-
-    # (D) 다항 함수: MultiVarFunction
-    elif isinstance(expr, MultiVarFunction):
-        # 인자 여러 개 -> 각 arg의 key를 튜플로
-        # (2, (arg1_key), (arg2_key), ..., func_name)
-        arg_keys = tuple(get_sort_key(a) for a in expr.args)
-        return (2,) + arg_keys + (expr.func,)
-
-    # (E) 단항 부정/단항 연산: UnaryOpExpression
-    elif isinstance(expr, UnaryOpExpression):
-        # 내부식 key만 반환
-        # 예: -(x+1)
-        sub_key = get_sort_key(expr.expr)
-        return sub_key
-
-    # (F) 2항 연산: BinOpExpression
-    elif isinstance(expr, BinOpExpression):
-        # op 별 rank: ^ < * < +, - < / 등
-        op_priority = {'^': 1, '*': 2, '+': 3, '-': 3, '/': 4}
-        rank_op = op_priority.get(expr.op, 99)
-
-        left_key = get_sort_key(expr.left)
-        right_key = get_sort_key(expr.right)
-
-        if expr.op == '^':
-            # right가 NumExpression이면 지수=int(...) 가능
-            if isinstance(expr.right, NumExpression):
-                e = expr.right.value
-                # exponent 내림차순 정렬을 위해 -e
-                return (rank_op, left_key, -float(e))
-            else:
-                # 지수가 변수나 함수인 경우
-                return (rank_op, left_key) + get_sort_key(expr.right)
-        
-        else:
-            # ^ 아니면 그냥 left_key, right_key 연결
-            # 예: +, -, *, / => (rank_op, left_key, right_key)
-            return (rank_op, left_key, right_key)
-
-    else:
-        # Unknown type
-        return (999, str(expr))
-    
 
 ######################
 # 연속성, 미분가능성 확인 #
@@ -1296,8 +1224,6 @@ def check_continuity_at(expr: Expression, point: dict[str, Decimal], tol=1e-8) -
         
         if isinstance(val_expr, NumExpression):
             val = float(val_expr.value)
-        # elif isinstance(val_expr, list) and all(isinstance(v, NumExpression) for v in val_expr):
-            # val = [float(v.value) for v in val_expr]
         else:
             return False
     except Exception:
@@ -1341,84 +1267,3 @@ def check_differentiability_at(expr: Expression, point: dict[str, Decimal], tol=
             return False
     
     return True
-
-def plot_graph(expr: Expression):
-    # expr.vars_ 는 수식에 사용된 변수들의 집합입니다.
-    variables = list(expr.vars_)
-    n = len(variables)
-
-    # 각 변수별로 도메인 정보를 활용하여 100개의 균등한 점을 생성합니다.
-    samples = {}
-    for var in variables:
-        interval = expr.domain[var]
-        start, end = interval.start, interval.end
-        # 도메인이 무한대인 경우 적절한 구간 [-10, 10]으로 대체합니다.
-        if start == -np.inf:
-            start = -10
-        if end == np.inf:
-            end = 10
-        samples[var] = np.linspace(start, end, 30)
-    
-    if n == 1:
-        # 1차원 함수: 한 변수에 대해 선 그래프로 그립니다.
-        var = variables[0]
-        x_vals = samples[var]
-        y_vals = [expr.evaluate({var: xi}).value for xi in x_vals]
-
-        plt.figure(figsize=(8, 6))
-        plt.plot(x_vals, y_vals, marker='o')
-        plt.xlabel(var)
-        plt.ylabel(f"f({var})")
-        plt.title("Plot of the Expression")
-        plt.grid(True)
-        plt.show()
-    
-    elif n == 2:
-        # 2차원 함수: 두 변수에 대해 meshgrid로 격자를 만들고, 3D surface plot을 그립니다.
-        X, Y = np.meshgrid(samples[variables[0]], samples[variables[1]])
-        # meshgrid로 만든 각 점에 대해 수식을 평가합니다.
-        points_list = []
-        for idx in range(X.size):
-            point = {variables[0]: X.flat[idx], variables[1]: Y.flat[idx]}
-            points_list.append(point)
-        values = np.array([expr.evaluate(point).value for point in points_list])
-        Z = values.reshape(X.shape)
-
-        from mpl_toolkits.mplot3d import Axes3D  # 3D plotting
-
-
-        fig = plt.figure(figsize=(8, 6))
-        ax = fig.add_subplot(111, projection='3d')
-        ax.plot_surface(X, Y, Z, cmap='viridis')
-        ax.set_xlabel(variables[0])
-        ax.set_ylabel(variables[1])
-        ax.set_zlabel(f"f({variables[0]}, {variables[1]})")
-        ax.set_title("Surface Plot of the Expression")
-        plt.show()
-    
-    else:
-        # 3개 이상의 변수가 있을 경우, 도메인을 전부 격자로 샘플링하기 어렵기 때문에
-        # 100개의 무작위 점을 선택하여 함수값을 계산하고, 샘플 인덱스에 따른 값으로 플롯합니다.
-        points_list = []
-        values = []
-        for _ in range(100):
-            point = {}
-            for var in variables:
-                interval = expr.domain[var]
-                start, end = interval.start, interval.end
-                if start == -np.inf:
-                    start = -10
-                if end == np.inf:
-                    end = 10
-                point[var] = np.random.uniform(start, end)
-            points_list.append(point)
-            values.append(expr.evaluate(point).value)
-        values = np.array(values)
-        
-        plt.figure(figsize=(8, 6))
-        plt.plot(range(len(values)), values, 'o-')
-        plt.xlabel("Sample Index")
-        plt.ylabel("Function Value")
-        plt.title("Plot of the Expression on Sample Points")
-        plt.grid(True)
-        plt.show()

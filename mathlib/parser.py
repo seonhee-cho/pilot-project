@@ -198,6 +198,6 @@ def calculate_expression(expression: str, verbose: bool = False) -> Decimal:
     tokens = Lexer.tokenize(expression)
     parser = MathParser()
     parser.tokens = tokens
-    ast = parser.parse()
+    ast = parser.parse().canonicalize()
     result = Evaluator.evaluate(ast, verbose=verbose)
     return result, ast
